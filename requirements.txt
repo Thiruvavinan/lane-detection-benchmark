@@ -5,6 +5,10 @@ numpy>=1.24.0
 opencv-python>=4.8.0
 PyYAML>=6.0
 
+# TuSimple official evaluation metric
+ujson>=5.8.0
+scikit-learn>=1.3.0
+
 # Optional: dataset download
 kaggle>=1.6.0
 
