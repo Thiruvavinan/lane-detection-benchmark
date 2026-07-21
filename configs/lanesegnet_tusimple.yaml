@@ -1,0 +1,42 @@
+# configs/lanesegnet_tusimple.yaml
+# ---------------------------------
+# LaneSegNet (transformer) on TuSimple (Milestone 5)
+
+experiment:
+  name: lanesegnet_tusimple
+  output_dir: runs/lanesegnet_tusimple
+
+dataset:
+  name: tusimple
+  root: data/tusimple
+  image_size: [360, 640]
+  augment: true
+
+dataloader:
+  batch_size: 4
+  num_workers: 4
+
+model:
+  name: lanesegnet
+  pretrained: true
+
+loss:
+  name: combined
+  bce_weight: 0.5
+  dice_weight: 0.5
+
+optimizer:
+  name: adamw
+  lr: 5.0e-5
+  weight_decay: 1.0e-4
+
+scheduler:
+  name: cosine
+  T_max: 50
+
+training:
+  epochs: 50
+  val_every: 5
+
+evaluation:
+  threshold: 0.5

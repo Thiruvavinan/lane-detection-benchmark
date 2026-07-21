@@ -1,0 +1,13 @@
+# Core
+torch>=2.1.0
+torchvision>=0.16.0
+numpy>=1.24.0
+opencv-python>=4.8.0
+PyYAML>=6.0
+
+# Optional: dataset download
+kaggle>=1.6.0
+
+# Development / notebooks
+matplotlib>=3.7.0
+tqdm>=4.66.0

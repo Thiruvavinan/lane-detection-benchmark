@@ -1,0 +1,43 @@
+# configs/unet_tusimple.yaml
+# --------------------------
+# U-Net baseline on TuSimple (Milestone 2)
+# To train: python scripts/train.py --config configs/unet_tusimple.yaml
+
+experiment:
+  name: unet_tusimple
+  output_dir: runs/unet_tusimple
+
+dataset:
+  name: tusimple
+  root: data/tusimple
+  image_size: [360, 640]
+  augment: true
+
+dataloader:
+  batch_size: 8
+  num_workers: 4
+
+model:
+  name: unet
+  base_channels: 64
+
+loss:
+  name: combined
+  bce_weight: 0.5
+  dice_weight: 0.5
+
+optimizer:
+  name: adamw
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+
+scheduler:
+  name: cosine
+  T_max: 50
+
+training:
+  epochs: 50
+  val_every: 5
+
+evaluation:
+  threshold: 0.5

@@ -1,0 +1,43 @@
+# configs/deeplab_tusimple.yaml
+# -----------------------------
+# DeepLabV3+ on TuSimple (Milestone 4)
+# Identical pipeline to unet_tusimple.yaml — only model block differs.
+
+experiment:
+  name: deeplab_tusimple
+  output_dir: runs/deeplab_tusimple
+
+dataset:
+  name: tusimple
+  root: data/tusimple
+  image_size: [360, 640]
+  augment: true
+
+dataloader:
+  batch_size: 4        # smaller: DeepLab is heavier
+  num_workers: 4
+
+model:
+  name: deeplab
+  pretrained: true
+
+loss:
+  name: combined
+  bce_weight: 0.5
+  dice_weight: 0.5
+
+optimizer:
+  name: adamw
+  lr: 5.0e-5           # lower LR for pretrained backbone
+  weight_decay: 1.0e-4
+
+scheduler:
+  name: cosine
+  T_max: 50
+
+training:
+  epochs: 50
+  val_every: 5
+
+evaluation:
+  threshold: 0.5
