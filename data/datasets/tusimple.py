@@ -11,13 +11,17 @@ We convert the keypoint annotations to binary pixel masks on the fly so that
 every model in the benchmark receives the same [C, H, W] image + [H, W] mask
 input regardless of what the original annotation format was.
 
-Directory layout expected under `root`:
+Directory layout expected under `root` (matches the Kaggle TuSimple
+archive layout, unzipped as-is):
     root/
-      clips/              # raw images
-      label_data_0313.json
-      label_data_0531.json
-      label_data_0601.json
-      test_label.json
+      train_set/
+        clips/            # raw training images
+        label_data_0313.json
+        label_data_0531.json
+        label_data_0601.json
+      test_set/
+        clips/            # raw test images
+      test_label.json     # test annotations, at root level
 """
 
 import json
@@ -67,6 +71,10 @@ class TuSimpleDataset(BaseDataset):
         self.image_size = image_size  # (H, W)
         self.augment = augment
 
+        # Images are nested under train_set/ or test_set/ depending on split;
+        # annotation "raw_file" paths are relative to that subfolder.
+        self.image_root = self.root / ("train_set" if self.split in ("train", "val") else "test_set")
+
         self.samples = self._load_samples()
 
     # ------------------------------------------------------------------
@@ -77,7 +85,7 @@ class TuSimpleDataset(BaseDataset):
         samples = []
         if self.split in ("train", "val"):
             for fname in self.TRAIN_JSONS:
-                fpath = self.root / fname
+                fpath = self.root / "train_set" / fname
                 if not fpath.exists():
                     raise FileNotFoundError(
                         f"Missing annotation file: {fpath}\n"
@@ -128,7 +136,7 @@ class TuSimpleDataset(BaseDataset):
 
         # --- image ---
         img_rel = sample["raw_file"]
-        img_path = str(self.root / img_rel)
+        img_path = str(self.image_root / img_rel)
         img_bgr = cv2.imread(img_path)
         if img_bgr is None:
             raise FileNotFoundError(f"Image not found: {img_path}")
