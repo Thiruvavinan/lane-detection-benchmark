@@ -1,0 +1,128 @@
+"""
+training/trainer.py
+-------------------
+Model-agnostic training loop.
+
+The Trainer does not import anything from models/. It receives a model
+that satisfies the BaseModel interface and trains it. Changing the
+architecture requires zero changes here.
+"""
+
+import time
+from pathlib import Path
+from typing import Optional
+
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
+
+class Trainer:
+    """
+    Parameters
+    ----------
+    model       : nn.Module  — must implement forward(x) -> logits [B,1,H,W]
+    loss_fn     : nn.Module  — accepts (logits, targets)
+    optimizer   : torch.optim.Optimizer
+    scheduler   : LR scheduler (optional)
+    device      : "cuda" | "cpu" | "mps"
+    output_dir  : path to save checkpoints and logs
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        loss_fn: nn.Module,
+        optimizer,
+        scheduler=None,
+        device: str = "cuda",
+        output_dir: str = "runs/experiment",
+    ):
+        self.model = model.to(device)
+        self.loss_fn = loss_fn.to(device)
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+        self.device = device
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def fit(
+        self,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        epochs: int,
+        val_every: int = 1,
+    ):
+        best_val_loss = float("inf")
+        history = []
+
+        for epoch in range(1, epochs + 1):
+            t0 = time.time()
+            train_loss = self._run_epoch(train_loader, training=True)
+            elapsed = time.time() - t0
+
+            log = {"epoch": epoch, "train_loss": train_loss, "time_s": round(elapsed, 1)}
+
+            if epoch % val_every == 0:
+                val_loss = self._run_epoch(val_loader, training=False)
+                log["val_loss"] = val_loss
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    self._save_checkpoint("best.pth")
+
+            if self.scheduler is not None:
+                self.scheduler.step()
+
+            history.append(log)
+            self._print_log(log)
+            self._save_checkpoint("last.pth")
+
+        return history
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _run_epoch(self, loader: DataLoader, training: bool) -> float:
+        self.model.train(training)
+        total_loss = 0.0
+        context = torch.enable_grad if training else torch.no_grad
+
+        with context():
+            for batch in loader:
+                images = batch["image"].to(self.device)
+                masks = batch["mask"].to(self.device)
+
+                logits = self.model(images)
+                loss = self.loss_fn(logits, masks)
+
+                if training:
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+
+                total_loss += loss.item()
+
+        return total_loss / len(loader)
+
+    def _save_checkpoint(self, filename: str):
+        torch.save(
+            {
+                "model_state": self.model.state_dict(),
+                "optimizer_state": self.optimizer.state_dict(),
+            },
+            self.output_dir / filename,
+        )
+
+    @staticmethod
+    def _print_log(log: dict):
+        parts = [f"Epoch {log['epoch']:03d}"]
+        parts.append(f"train_loss={log['train_loss']:.4f}")
+        if "val_loss" in log:
+            parts.append(f"val_loss={log['val_loss']:.4f}")
+        parts.append(f"({log['time_s']}s)")
+        print("  ".join(parts))
