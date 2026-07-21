@@ -69,6 +69,7 @@ def main():
         shuffle=True,
         num_workers=dl_cfg.get("num_workers", 4),
         pin_memory=device == "cuda",
+        collate_fn=train_ds.collate_fn,
     )
     val_loader = DataLoader(
         val_ds,
@@ -76,6 +77,7 @@ def main():
         shuffle=False,
         num_workers=dl_cfg.get("num_workers", 4),
         pin_memory=device == "cuda",
+        collate_fn=val_ds.collate_fn,
     )
 
     # ------------------------------------------------------------------

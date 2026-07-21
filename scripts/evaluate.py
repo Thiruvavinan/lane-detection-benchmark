@@ -63,6 +63,7 @@ def main():
         batch_size=dl_cfg["batch_size"],
         shuffle=False,
         num_workers=dl_cfg.get("num_workers", 4),
+        collate_fn=test_ds.collate_fn,
     )
 
     # ------------------------------------------------------------------

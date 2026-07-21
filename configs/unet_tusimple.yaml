@@ -14,7 +14,10 @@ dataset:
   augment: true
 
 dataloader:
-  batch_size: 8
+  # batch_size=8 OOMs on a 4GB RTX 2050 (peaks ~6.6GB and spills into slow
+  # shared system RAM instead of erroring outright). batch_size=2 fits
+  # cleanly at ~3.5GB peak.
+  batch_size: 2
   num_workers: 4
 
 model:

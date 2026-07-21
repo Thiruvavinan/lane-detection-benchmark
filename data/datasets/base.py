@@ -9,7 +9,7 @@ other part of the pipeline (training/, evaluation/, visualization/).
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Any, Dict, List
 
 import torch
 from torch.utils.data import Dataset
@@ -62,3 +62,24 @@ class BaseDataset(Dataset, ABC):
         import numpy as np
         mask = (np.asarray(np_mask) > 0).astype(np.int64)
         return torch.from_numpy(mask)
+
+    # ------------------------------------------------------------------
+    # DataLoader collation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Stack "image" and "mask" into batch tensors; keep "meta" as a
+        plain list of per-sample dicts.
+
+        Every consumer downstream (evaluation/, visualization/) indexes
+        meta per-sample (`meta[i]`), and meta values like `scenario` are
+        often `None` — PyTorch's default collate can't batch `None` and
+        would otherwise merge the list of dicts into a dict of lists.
+        """
+        return {
+            "image": torch.stack([sample["image"] for sample in batch]),
+            "mask": torch.stack([sample["mask"] for sample in batch]),
+            "meta": [sample["meta"] for sample in batch],
+        }
