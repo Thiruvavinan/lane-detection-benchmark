@@ -56,8 +56,16 @@ class Trainer:
         val_loader: DataLoader,
         epochs: int,
         val_every: int = 1,
+        early_stopping_patience: Optional[int] = None,
     ):
+        """
+        early_stopping_patience : stop once this many epochs have passed
+            since val_loss last improved (measured in epochs, but only
+            checked at validation points, i.e. every `val_every` epochs).
+            None disables early stopping and always runs `epochs` epochs.
+        """
         best_val_loss = float("inf")
+        epochs_since_improvement = 0
         history = []
 
         for epoch in range(1, epochs + 1):
@@ -72,7 +80,10 @@ class Trainer:
                 log["val_loss"] = val_loss
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
+                    epochs_since_improvement = 0
                     self._save_checkpoint("best.pth")
+                else:
+                    epochs_since_improvement += val_every
 
             if self.scheduler is not None:
                 self.scheduler.step()
@@ -80,6 +91,16 @@ class Trainer:
             history.append(log)
             self._print_log(log)
             self._save_checkpoint("last.pth")
+
+            if (
+                early_stopping_patience is not None
+                and epochs_since_improvement >= early_stopping_patience
+            ):
+                print(
+                    f"Early stopping: val_loss has not improved in "
+                    f"{epochs_since_improvement} epochs (patience={early_stopping_patience})"
+                )
+                break
 
         return history
 

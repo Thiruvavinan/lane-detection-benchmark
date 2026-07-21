@@ -41,6 +41,10 @@ scheduler:
 training:
   epochs: 50
   val_every: 5
+  # Stop once val_loss hasn't improved for 3 consecutive checks (15 epochs).
+  # epochs/T_max stay at 50 as a ceiling — the cosine schedule keeps
+  # decaying normally up to whichever epoch we actually stop at.
+  early_stopping_patience: 15
 
 evaluation:
   threshold: 0.5

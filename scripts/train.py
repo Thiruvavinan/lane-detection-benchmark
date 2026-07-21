@@ -120,6 +120,7 @@ def main():
         val_loader=val_loader,
         epochs=train_cfg["epochs"],
         val_every=train_cfg.get("val_every", 1),
+        early_stopping_patience=train_cfg.get("early_stopping_patience"),
     )
 
 
