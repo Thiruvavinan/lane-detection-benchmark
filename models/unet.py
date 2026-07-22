@@ -3,9 +3,11 @@ models/unet.py
 --------------
 U-Net baseline (Milestone 2).
 
-A standard encoder-decoder with skip connections.
-Input  : [B, 3, H, W]
-Output : [B, 1, H, W]  raw logits
+A standard encoder-decoder with skip connections. The decoder's final
+feature map feeds a shared LanePointHead (models/heads.py) instead of a
+dense-mask conv — output shape and meaning are defined by the target
+dataset (see models/base.py), not by this file.
+Input : [B, 3, H, W]
 
 Reference: Ronneberger et al., "U-Net: Convolutional Networks for
 Biomedical Image Segmentation", MICCAI 2015.
@@ -16,6 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .base import BaseModel
+from .heads import LanePointHead
 
 
 # ------------------------------------------------------------------
@@ -79,9 +82,13 @@ class UNet(BaseModel):
     base_channels : int
         Number of feature channels after the first convolution.
         Doubled at each encoder stage. Default: 64.
+    max_lanes, num_rows, orig_width : dataset-defined output shape,
+        injected by the training/eval scripts from the target dataset
+        class (e.g. TuSimpleDataset.MAX_LANES) — not hardcoded here, so
+        this file has no TuSimple-specific knowledge.
     """
 
-    def __init__(self, base_channels: int = 64):
+    def __init__(self, base_channels: int = 64, max_lanes: int = 5, num_rows: int = 56, orig_width: float = 1280.0):
         super().__init__()
         c = base_channels
 
@@ -100,8 +107,8 @@ class UNet(BaseModel):
         self.dec2 = Up(c * 4 + c * 2, c * 2)
         self.dec1 = Up(c * 2 + c, c)
 
-        # Output head — raw logit, no activation
-        self.head = nn.Conv2d(c, 1, kernel_size=1)
+        # Output head — dataset's native representation, not a dense mask
+        self.point_head = LanePointHead(c, max_lanes, num_rows, orig_width)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Encoder
@@ -117,4 +124,4 @@ class UNet(BaseModel):
         d2 = self.dec2(d3, e2)
         d1 = self.dec1(d2, e1)
 
-        return self.head(d1)
+        return self.point_head(d1)

@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import torch
 import yaml
 
+from data.datasets import DATASETS
 from models import build_model
 from evaluation.engineering import profile_model
 
@@ -50,11 +51,18 @@ def main():
     image_size = tuple(cfg["dataset"]["image_size"])  # (H, W)
 
     # ------------------------------------------------------------------
-    # Model
+    # Model — output shape is dataset-defined, injected here, not in the config
     # ------------------------------------------------------------------
+    ds_cls = DATASETS[cfg["dataset"]["name"]]
     model_cfg = dict(cfg["model"])
     model_name = model_cfg.pop("name")
-    model = build_model(model_name, **model_cfg)
+    model = build_model(
+        model_name,
+        max_lanes=ds_cls.MAX_LANES,
+        num_rows=ds_cls.NUM_ROWS,
+        orig_width=ds_cls.ORIG_WIDTH,
+        **model_cfg,
+    )
 
     if args.checkpoint or (output_dir / "best.pth").exists():
         ckpt_path = args.checkpoint or str(output_dir / "best.pth")

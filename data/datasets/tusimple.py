@@ -3,13 +3,11 @@ data/datasets/tusimple.py
 -------------------------
 TuSimple lane detection dataset loader.
 
-TuSimple provides:
-  - RGB images at 1280×720
-  - JSON annotation files with lane keypoints (not pixel masks)
-
-We convert the keypoint annotations to binary pixel masks on the fly so that
-every model in the benchmark receives the same [C, H, W] image + [H, W] mask
-input regardless of what the original annotation format was.
+TuSimple provides RGB images (1280x720) and JSON keypoint annotations:
+one x per fixed y row ("h_samples"), -2 where a lane has no point there.
+Every model targeting this dataset outputs that same keypoint
+representation directly (see MAX_LANES / H_SAMPLES below) — no dense
+mask in between. See BaseDataset's docstring for why.
 
 Directory layout expected under `root` (matches the Kaggle TuSimple
 archive layout, unzipped as-is):
@@ -22,17 +20,29 @@ archive layout, unzipped as-is):
       test_set/
         clips/            # raw test images
       test_label.json     # test annotations, at root level
+
+Target representation
+----------------------
+Train and test label files annotate different y-ranges (train starts at
+y=240, test at y=160, both step 10 up to y=710 — checked directly).
+Every sample is re-expressed on the union: H_SAMPLES = 160..710 step 10
+(56 rows). Rows outside a sample's own range are UNKNOWN, distinct from
+"no lane" (INVALID) — one is a missing label, the other a real negative,
+and only the latter is a valid training signal.
+
+Lanes are sorted left-to-right (mean x over valid points) into MAX_LANES
+fixed slots, so "slot 0" means the same thing across every image — a
+fixed-slot regression head can't learn otherwise. MAX_LANES=5 is the
+observed max across every label file (checked directly, not assumed).
 """
 
 import json
-import os
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import cv2
 import numpy as np
 import torch
-from torch.utils.data import Dataset
 
 from .base import BaseDataset
 
@@ -57,6 +67,15 @@ class TuSimpleDataset(BaseDataset):
         "label_data_0601.json",
     ]
     TEST_JSON = "test_label.json"
+
+    # --- Target representation constants (see module docstring) ---
+    H_SAMPLES: Tuple[int, ...] = tuple(range(160, 711, 10))  # 56 rows
+    NUM_ROWS = len(H_SAMPLES)
+    MAX_LANES = 5
+    ORIG_WIDTH = 1280.0   # TuSimple images are always 1280x720
+    ORIG_HEIGHT = 720.0
+    INVALID = -2.0   # row is annotated; this lane slot has no point here
+    UNKNOWN = -3.0   # row falls outside this sample's own annotated range
 
     def __init__(
         self,
@@ -107,22 +126,42 @@ class TuSimpleDataset(BaseDataset):
                     samples.append(json.loads(line.strip()))
         return samples
 
-    def _keypoints_to_mask(self, lanes, h_samples, orig_h, orig_w) -> np.ndarray:
-        """Draw lane polylines onto a binary mask."""
-        H, W = self.image_size
-        scale_x = W / orig_w
-        scale_y = H / orig_h
-        mask = np.zeros((H, W), dtype=np.uint8)
-        for lane in lanes:
-            pts = [
-                (int(x * scale_x), int(y * scale_y))
-                for x, y in zip(lane, h_samples)
-                if x >= 0
-            ]
-            if len(pts) >= 2:
-                for i in range(len(pts) - 1):
-                    cv2.line(mask, pts[i], pts[i + 1], color=1, thickness=5)
-        return mask
+    def _row_index(self, y: int):
+        """Map a sample's own h_samples row onto the canonical H_SAMPLES grid."""
+        idx = (y - self.H_SAMPLES[0]) // 10
+        return idx if 0 <= idx < self.NUM_ROWS else None
+
+    def _lanes_to_target(self, lanes, h_samples) -> torch.Tensor:
+        """
+        Re-express this sample's lanes on the canonical H_SAMPLES grid,
+        sorted left-to-right, in MAX_LANES fixed slots.
+
+        Returns [MAX_LANES, NUM_ROWS] float32: x in original pixel scale
+        where a lane has a real point, INVALID where this sample's own
+        annotation says "no lane here", UNKNOWN where this row simply
+        isn't part of this sample's own h_samples range at all.
+        """
+        target = torch.full((self.MAX_LANES, self.NUM_ROWS), self.UNKNOWN, dtype=torch.float32)
+
+        covered_rows = [r for r in (self._row_index(y) for y in h_samples) if r is not None]
+        for r in covered_rows:
+            target[:, r] = self.INVALID
+
+        def mean_x(lane):
+            xs = [x for x in lane if x >= 0]
+            return sum(xs) / len(xs) if xs else float("inf")
+
+        sorted_lanes = sorted(lanes, key=mean_x)[: self.MAX_LANES]
+
+        for slot, lane in enumerate(sorted_lanes):
+            for x, y in zip(lane, h_samples):
+                if x < 0:
+                    continue
+                r = self._row_index(y)
+                if r is not None:
+                    target[slot, r] = float(x)
+
+        return target
 
     # ------------------------------------------------------------------
     # Dataset interface
@@ -144,42 +183,36 @@ class TuSimpleDataset(BaseDataset):
         img_bgr = cv2.resize(img_bgr, (self.image_size[1], self.image_size[0]))
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-        # --- mask ---
+        # --- target ---
         lanes = sample.get("lanes", [])
         h_samples = sample.get("h_samples", [])
-        mask_np = self._keypoints_to_mask(lanes, h_samples, orig_h, orig_w)
+        target = self._lanes_to_target(lanes, h_samples)
 
         # --- augmentation (training only) ---
         if self.augment:
-            img_rgb, mask_np = self._augment(img_rgb, mask_np)
+            img_rgb, target = self._augment(img_rgb, target)
 
         image = self.to_tensor_image(img_rgb)
-        mask = self.to_tensor_mask(mask_np)
 
         return {
             "image": image,
-            "mask": mask,
+            "target": target,
             "meta": {
                 "image_path": img_path,
                 # TuSimple has no scenario labels; set to None.
                 # The evaluation step will skip per-scenario metrics.
                 "scenario": None,
-                # Raw keypoint annotation, kept for the official TuSimple
-                # point-level metric (evaluation/tusimple_metrics.py),
-                # which needs exact ground truth, not our rasterized mask.
-                "gt_lanes": lanes,
-                "h_samples": h_samples,
                 "orig_size": (orig_h, orig_w),
             },
         }
 
-    def _augment(self, image: np.ndarray, mask: np.ndarray):
-        """Minimal training augmentation: horizontal flip."""
+    def _augment(self, image: np.ndarray, target: torch.Tensor):
+        """Horizontal flip: mirror the image, x-coordinates, and lane slot order."""
         if np.random.rand() > 0.5:
             image = np.fliplr(image).copy()
-            mask = np.fliplr(mask).copy()
-        return image, mask
-
-
-def __init__():
-    pass
+            real = target >= 0
+            flipped = target.clone()
+            flipped[real] = (self.ORIG_WIDTH - 1) - target[real]
+            # Reverse slot order so slot 0 stays "leftmost" after mirroring.
+            target = torch.flip(flipped, dims=[0])
+        return image, target

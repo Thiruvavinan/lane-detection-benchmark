@@ -5,9 +5,11 @@ Official TuSimple lane-detection evaluation metric, ported to Python 3.
 
 TuSimple does not annotate lanes as pixel masks. Each label is a sparse
 set of keypoints: one x position per fixed y row ("h_samples"), with -2
-where a lane has no point at that row. `metrics.py` measures pixel-level
-IoU/F1 on masks, which is strict and not comparable to published TuSimple
-leaderboard numbers. This file ports the official scoring logic from
+where a lane has no point at that row. Every model targeting TuSimple
+(see data/datasets/tusimple.py, models/heads.py) outputs that same
+representation directly, so this evaluator scores real model output with
+zero conversion step in between — no mask, no extraction heuristic. This
+file ports the official scoring logic from
 https://github.com/TuSimple/tusimple-benchmark/blob/master/evaluate/lane.py
 (originally Python 2 + ujson) unchanged, so results are directly
 comparable to published numbers for other architectures.
@@ -41,7 +43,7 @@ Usage
 """
 
 from collections import defaultdict
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence
 
 import numpy as np
 
@@ -210,117 +212,6 @@ def _average(sum_acc: float, sum_fp: float, sum_fn: float, count: int) -> dict:
         "fp": round(sum_fp / n, 4),
         "fn": round(sum_fn / n, 4),
     }
-
-
-def mask_to_lanes(
-    mask: np.ndarray,
-    h_samples: Sequence[float],
-    mask_size: Tuple[int, int],
-    orig_size: Tuple[int, int],
-    max_gap_px: float = 40.0,
-) -> List[List[float]]:
-    """
-    Extract lane x-coordinates from a dense binary mask, in the same
-    per-row format as TuSimple's keypoint annotations, so predictions
-    from a dense-mask model (every architecture in this benchmark) can
-    be scored with the official point-level metric above.
-
-    Our models have no notion of separate lane instances -- just one
-    binary mask -- so this is a heuristic, not a learned prediction:
-      1. For each h_samples row, scale it into mask coordinates and find
-         contiguous runs of foreground pixels; each run's center is one
-         candidate point, scaled back to original-image x.
-      2. Walk rows top to bottom, greedily extending each open lane
-         track with whichever unused candidate is closest to the
-         track's *predicted* x (within `max_gap_px`) -- predicted by
-         linearly extrapolating from the track's last point using its
-         running slope (x-change per row), not just its last raw x.
-         This matters because rows are 10px apart in y but a curving or
-         steeply-angled lane can shift well past `max_gap_px` in x over
-         even a couple of missed rows; extrapolating the trend keeps a
-         gappy/curving lane as one track instead of splitting it into
-         several short fragments. Unmatched candidates start new
-         tracks. A row with no nearby candidate leaves that track's
-         point as -2 ("no lane here"), matching TuSimple's convention.
-
-         Fragmentation is expensive under the official metric: a track
-         only needs to *exist* at every gt row to score well, since a
-         missing point where gt has one counts as a miss for the whole
-         row (see `line_accuracy` above) -- so one lane split into two
-         half-length tracks scores far worse than one full-length track
-         with a few wrong points in the middle.
-
-    Good enough for comparing architectures that all share this dense
-    mask output -- not a substitute for a real instance-aware decoder.
-
-    Parameters
-    ----------
-    mask       : [H, W] binary array, at `mask_size` resolution
-    h_samples  : y rows to sample, in ORIGINAL image coordinates
-    mask_size  : (H, W) of `mask`
-    orig_size  : (H, W) of the original image the annotation was made on
-    """
-    mask_h, mask_w = mask_size
-    orig_h, orig_w = orig_size
-    scale_y = mask_h / orig_h
-    scale_x_inv = orig_w / mask_w
-
-    # 1. Per-row candidate x positions, in original-image coordinates.
-    row_candidates: List[List[float]] = []
-    for y in h_samples:
-        y_mask = min(max(int(round(y * scale_y)), 0), mask_h - 1)
-        row = mask[y_mask]
-        candidates = []
-        x = 0
-        while x < mask_w:
-            if row[x]:
-                start = x
-                while x < mask_w and row[x]:
-                    x += 1
-                candidates.append((start + x - 1) / 2.0 * scale_x_inv)
-            else:
-                x += 1
-        row_candidates.append(candidates)
-
-    # 2. Greedily link candidates across rows into lane tracks, matching
-    #    against each track's linearly-extrapolated predicted position.
-    tracks: List[List[float]] = []
-    last_row: List[int] = []
-    last_x: List[float] = []
-    slope: List[float] = []  # x-change per row index, 0 until 2+ points seen
-
-    for row_idx, candidates in enumerate(row_candidates):
-        used = [False] * len(candidates)
-
-        for t in range(len(tracks)):
-            predicted_x = last_x[t] + slope[t] * (row_idx - last_row[t])
-            best_j, best_dist = -1, max_gap_px
-            for j, cx in enumerate(candidates):
-                if used[j]:
-                    continue
-                dist = abs(cx - predicted_x)
-                if dist < best_dist:
-                    best_j, best_dist = j, dist
-            if best_j >= 0:
-                cx = candidates[best_j]
-                gap = row_idx - last_row[t]
-                slope[t] = (cx - last_x[t]) / gap
-                tracks[t][row_idx] = cx
-                last_row[t] = row_idx
-                last_x[t] = cx
-                used[best_j] = True
-
-        for j, cx in enumerate(candidates):
-            if used[j]:
-                continue
-            new_track = [INVALID] * len(h_samples)
-            new_track[row_idx] = cx
-            tracks.append(new_track)
-            last_row.append(row_idx)
-            last_x.append(cx)
-            slope.append(0.0)
-
-    return tracks
 
 
 def format_results(results: dict) -> str:

@@ -4,11 +4,11 @@ models/deeplab.py
 DeepLabV3+ for lane segmentation (Milestone 4).
 
 Uses a ResNet-50 backbone pretrained on ImageNet, followed by an ASPP
-module and a lightweight decoder. Output is a single-channel logit map
-at full input resolution.
-
-Input  : [B, 3, H, W]
-Output : [B, 1, H, W]  raw logits
+module and a lightweight decoder. The decoder's feature map feeds the
+same shared LanePointHead U-Net uses (models/heads.py) — output shape
+and meaning are defined by the target dataset (see models/base.py), not
+by this file.
+Input : [B, 3, H, W]
 
 Reference: Chen et al., "Encoder-Decoder with Atrous Separable
 Convolution for Semantic Image Segmentation", ECCV 2018.
@@ -21,6 +21,7 @@ from torchvision.models import resnet50, ResNet50_Weights
 from torchvision.models._utils import IntermediateLayerGetter
 
 from .base import BaseModel
+from .heads import LanePointHead
 
 
 # ------------------------------------------------------------------
@@ -85,20 +86,34 @@ class DeepLabV3Plus(BaseModel):
     ----------
     pretrained : bool
         Load ImageNet-pretrained ResNet-50 backbone. Default: True.
+    max_lanes, num_rows, orig_width : dataset-defined output shape,
+        injected by the training/eval scripts from the target dataset
+        class (e.g. TuSimpleDataset.MAX_LANES) — not hardcoded here.
     """
 
-    def __init__(self, pretrained: bool = True):
+    def __init__(
+        self,
+        pretrained: bool = True,
+        max_lanes: int = 5,
+        num_rows: int = 56,
+        orig_width: float = 1280.0,
+    ):
         super().__init__()
 
         weights = ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
         backbone = resnet50(weights=weights)
 
-        # Dilate layer4 to preserve spatial resolution (output stride 16 → 8)
+        # Dilate layer4 to preserve spatial resolution (output stride 16 → 8).
+        # Only the 3x3 convs get dilation+padding — applying padding=2 to
+        # the 1x1 stride-2 downsample/skip conv too (it also matches
+        # stride==(2,2)) would grow its output by 4px relative to the main
+        # branch's 3x3 path, breaking the residual add's shape match.
         for n, m in backbone.layer4.named_modules():
             if isinstance(m, nn.Conv2d) and m.stride == (2, 2):
                 m.stride = (1, 1)
-                m.dilation = (2, 2)
-                m.padding = (2, 2)
+                if m.kernel_size == (3, 3):
+                    m.dilation = (2, 2)
+                    m.padding = (2, 2)
 
         self.backbone = IntermediateLayerGetter(
             backbone, return_layers={"layer1": "low", "layer4": "high"}
@@ -122,7 +137,7 @@ class DeepLabV3Plus(BaseModel):
             nn.ReLU(inplace=True),
         )
 
-        self.head = nn.Conv2d(256, 1, 1)
+        self.point_head = LanePointHead(256, max_lanes, num_rows, orig_width)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         input_size = x.shape[-2:]
@@ -134,4 +149,4 @@ class DeepLabV3Plus(BaseModel):
         high = F.interpolate(high, size=low.shape[-2:], mode="bilinear", align_corners=False)
         x = self.decoder(torch.cat([high, low], dim=1))
         x = F.interpolate(x, size=input_size, mode="bilinear", align_corners=False)
-        return self.head(x)
+        return self.point_head(x)

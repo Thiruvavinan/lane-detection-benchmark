@@ -32,10 +32,18 @@ class BaseDataset(torch.utils.data.Dataset):
         # Must return:
         # {
         #   "image":  torch.Tensor [C, H, W],
-        #   "mask":   torch.Tensor [H, W],   # binary lane mask
+        #   "target": dataset's OWN native ground-truth representation —
+        #             type/shape defined by the dataset, not by this
+        #             class. TuSimple's is a [MAX_LANES, NUM_ROWS] tensor
+        #             of x per lane per row (see datasets/tusimple.py).
         #   "meta":   dict                   # scenario tags, image path, etc.
         # }
 ```
+
+Every model outputs its dataset's `target` format directly — not a
+universal mask. A single-channel mask can't reliably separate lane
+instances after the fact, so the model matches the dataset's own
+annotation format instead, and evaluation scores it with zero conversion.
 
 The `meta` dict is what powers failure-case analysis. Every sample carries its scenario tag (`curve`, `night`, `rain`, …) so the evaluation step can compute per-scenario metrics automatically when labels are available.
 
@@ -55,5 +63,6 @@ No changes needed in training, evaluation, or visualization.
 ## Why TuSimple first?
 
 - Widely used → easy to compare against published numbers
-- Clean binary lane masks → simple baseline target
+- Native sparse-keypoint annotations → matches the official evaluation
+  format exactly, no lossy conversion needed
 - Small enough to iterate on a single GPU

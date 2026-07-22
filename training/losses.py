@@ -3,12 +3,13 @@ training/losses.py
 ------------------
 Loss functions used across all architectures.
 
-All losses accept:
-    logits : [B, 1, H, W]  float32  (raw model output, no activation)
-    targets: [B, H, W]     int64    (binary mask, values in {0, 1})
-
-Keeping losses here — not inside model files — means every architecture
-is evaluated with identical loss functions. Fair comparison.
+A loss here is paired to a target dataset's own representation (see
+data/datasets/base.py) — DiceLoss/CombinedLoss below are for a dense
+[B, H, W] mask target, if some future dataset's native format is one.
+TuSimple's target is points (see data/datasets/tusimple.py), scored by
+LanePointLoss. Keeping losses here — not inside model files — means
+every architecture targeting the same dataset is trained with the same
+loss. Fair comparison.
 """
 
 import torch
@@ -71,11 +72,61 @@ class CombinedLoss(nn.Module):
         return self.bce_w * bce_loss + self.dice_w * dice_loss
 
 
+class LanePointLoss(nn.Module):
+    """
+    Loss for TuSimple-style point targets: [MAX_LANES, NUM_ROWS] x per
+    lane per row, UNKNOWN (-3) where the row falls outside a sample's
+    own annotated range, INVALID (-2) where the row is annotated but
+    this lane slot has no point, and >= 0 for a real x-coordinate (see
+    data/datasets/tusimple.py for exactly what these mean).
+
+    Combines:
+      - SmoothL1 on x, only at rows with a real point (UNKNOWN/INVALID
+        rows carry no coordinate information to regress toward).
+      - BCE on the existence logit, at every row *except* UNKNOWN ones
+        — INVALID rows are a real "no lane here" signal and must count,
+        just not toward the coordinate term.
+
+    Parameters
+    ----------
+    coord_weight : weight on the SmoothL1 coordinate term
+    exist_weight : weight on the BCE existence term
+    """
+
+    UNKNOWN = -3.0
+
+    def __init__(self, coord_weight: float = 1.0, exist_weight: float = 1.0):
+        super().__init__()
+        self.coord_weight = coord_weight
+        self.exist_weight = exist_weight
+        self.smooth_l1 = nn.SmoothL1Loss(reduction="none")
+        self.bce = nn.BCEWithLogitsLoss()
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        pred   : [B, 2, MAX_LANES, NUM_ROWS] -- pred[:,0]=x, pred[:,1]=existence logit
+        target : [B, MAX_LANES, NUM_ROWS]     -- x, or UNKNOWN/INVALID sentinel
+        """
+        pred_coord = pred[:, 0]
+        pred_exist_logit = pred[:, 1]
+
+        has_point = target >= 0
+        known = target != self.UNKNOWN
+
+        coord_mask = has_point.float()
+        coord_loss = (self.smooth_l1(pred_coord, target) * coord_mask).sum() / coord_mask.sum().clamp(min=1.0)
+
+        exist_loss = self.bce(pred_exist_logit[known], has_point.float()[known])
+
+        return self.coord_weight * coord_loss + self.exist_weight * exist_loss
+
+
 def build_loss(name: str, **kwargs) -> nn.Module:
     LOSSES = {
         "bce": nn.BCEWithLogitsLoss,
         "dice": DiceLoss,
         "combined": CombinedLoss,
+        "lane_points": LanePointLoss,
     }
     if name not in LOSSES:
         raise ValueError(f"Unknown loss '{name}'. Available: {list(LOSSES)}")

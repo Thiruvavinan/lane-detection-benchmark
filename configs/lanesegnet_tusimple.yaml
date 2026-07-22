@@ -21,9 +21,9 @@ model:
   pretrained: true
 
 loss:
-  name: combined
-  bce_weight: 0.5
-  dice_weight: 0.5
+  name: lane_points
+  coord_weight: 1.0
+  exist_weight: 1.0
 
 optimizer:
   name: adamw
@@ -39,4 +39,4 @@ training:
   val_every: 5
 
 evaluation:
-  threshold: 0.5
+  threshold: 0.5   # existence-probability threshold, not a mask threshold

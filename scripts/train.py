@@ -24,7 +24,7 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from data.datasets import build_dataset
+from data.datasets import DATASETS, build_dataset
 from models import build_model
 from training.losses import build_loss
 from training.optim import build_optimizer, build_scheduler
@@ -85,11 +85,18 @@ def main():
     )
 
     # ------------------------------------------------------------------
-    # Model
+    # Model — output shape is dataset-defined, injected here, not in the config
     # ------------------------------------------------------------------
+    ds_cls = DATASETS[ds_cfg["name"]]
     model_cfg = dict(cfg["model"])
     model_name = model_cfg.pop("name")
-    model = build_model(model_name, **model_cfg)
+    model = build_model(
+        model_name,
+        max_lanes=ds_cls.MAX_LANES,
+        num_rows=ds_cls.NUM_ROWS,
+        orig_width=ds_cls.ORIG_WIDTH,
+        **model_cfg,
+    )
     print(f"Model: {model_name}  ({model.num_parameters()/ 1e6:.1f}M params)")
 
     # ------------------------------------------------------------------

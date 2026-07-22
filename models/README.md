@@ -22,12 +22,18 @@ Every architecture implements `BaseModel`:
 ```python
 class BaseModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x     : [B, 3, H, W]  float32
-        # return : [B, 1, H, W]  float32  (raw logits, not sigmoid)
+        # x      : [B, 3, H, W]  float32
+        # return : shape and meaning defined by the TARGET DATASET, not
+        #          by this class — e.g. for TuSimple, a
+        #          [B, 2, MAX_LANES, NUM_ROWS] tensor (x-coord + existence
+        #          logit per lane slot per row). See data/datasets/base.py.
 ```
 
-That's the entire contract. The training pipeline calls `forward`, applies the
-loss, and runs the optimizer. The model never sees the loss or the dataset.
+That's the entire contract — the model never sees the loss or dataset,
+but its output must match whatever dataset it targets, so evaluation can
+apply that dataset's own official metric with no conversion. U-Net and
+DeepLab both use the shared `LanePointHead` (`models/heads.py`) for
+this — one head, reusable across backbones.
 
 ---
 
@@ -36,6 +42,7 @@ loss, and runs the optimizer. The model never sees the loss or the dataset.
 ```
 models/
 ├── base.py         # BaseModel — all architectures implement this
+├── heads.py         # LanePointHead — shared output head, any backbone can attach it
 ├── unet.py         # Milestone 2: U-Net baseline
 ├── deeplab.py      # Milestone 4: DeepLabV3+
 ├── lanesegnet.py   # Milestone 5: LaneSegNet (transformer)

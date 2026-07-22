@@ -3,7 +3,8 @@
 scripts/visualize_dataset.py
 -----------------------------
 Sanity-check the dataset pipeline before training: sample a few images,
-draw their ground-truth lane annotations, and display them in a
+draw their ground-truth lane points (the dataset's own target
+representation — see data/datasets/tusimple.py), and display them in a
 matplotlib grid.
 
 Usage
@@ -21,7 +22,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from data.datasets import build_dataset
-from visualization.overlay import mask_overlay
 
 
 def main():
@@ -35,6 +35,12 @@ def main():
     dataset = build_dataset("tusimple", root=args.root, split=args.split, augment=False)
     print(f"Loaded {len(dataset)} samples from {args.root} ({args.split} split)")
 
+    # Target x/y are in original TuSimple pixel scale; scale to the
+    # resized image shown here.
+    scale_x = dataset.image_size[1] / dataset.ORIG_WIDTH
+    scale_y = dataset.image_size[0] / dataset.ORIG_HEIGHT
+    h_samples = dataset.H_SAMPLES
+
     rng = np.random.default_rng(args.seed)
     indices = rng.choice(len(dataset), size=min(args.n, len(dataset)), replace=False)
 
@@ -46,10 +52,19 @@ def main():
     for ax, idx in zip(axes, indices):
         sample = dataset[int(idx)]
         image = (sample["image"].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
-        mask = sample["mask"].numpy()
-        overlay = mask_overlay(image, mask)
+        target = sample["target"].numpy()  # [MAX_LANES, NUM_ROWS]
 
-        ax.imshow(overlay)
+        ax.imshow(image)
+        for slot in range(target.shape[0]):
+            xs, ys = [], []
+            for r, y in enumerate(h_samples):
+                x = target[slot, r]
+                if x >= 0:
+                    xs.append(x * scale_x)
+                    ys.append(y * scale_y)
+            if xs:
+                ax.plot(xs, ys, marker="o", markersize=2, linewidth=1.5)
+
         ax.set_title(f"idx {idx}", fontsize=9)
         ax.axis("off")
 

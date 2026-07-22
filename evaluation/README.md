@@ -26,26 +26,28 @@ evaluation/
 
 ## Two kinds of evaluation
 
-### 1. Accuracy metrics (`metrics.py`)
+### 1. Accuracy metrics (`tusimple_metrics.py`)
 
-Standard segmentation metrics computed over the test set:
+Models output their target dataset's own representation directly (see
+data/datasets/base.py, models/base.py) — for TuSimple, sparse keypoints.
+`scripts/evaluate.py` scores that output with `TuSimpleEvaluator`, the
+official TuSimple metric, with no conversion step in between:
 
 | Metric | Description |
 |--------|-------------|
-| IoU | Intersection over Union (binary) |
-| F1 | Dice coefficient = 2·P·R / (P+R) |
-| Precision | TP / (TP + FP) |
-| Recall | TP / (TP + FN) |
+| Accuracy | fraction of matched ground-truth points within ±20px |
+| FP | unmatched predicted lanes / predicted lanes |
+| FN | unmatched ground-truth lanes / ground-truth lanes |
 
 **Per-scenario breakdown** — when `meta["scenario"]` is available,
-metrics are also reported per scenario:
+metrics are also reported per scenario. TuSimple itself has no scenario
+labels, so this is currently empty for it; a future dataset that does
+label scenarios would populate it automatically.
 
-| Scenario | IoU | F1 |
-|----------|-----|----|
-| straight | | |
-| curve | | |
-| night | | |
-| … | | |
+`metrics.py` (pixel IoU/F1 on a mask) isn't wired into `evaluate.py`
+yet — predictions are points now, not masks. Rendering points into a
+mask is well-defined (unlike the reverse), so it's a reasonable
+follow-up, just not done.
 
 ### 2. Engineering metrics (`engineering.py`)
 

@@ -5,15 +5,24 @@ Abstract base class for all lane detection models in this benchmark.
 
 Contract
 --------
-forward(x) receives a batch of RGB images and returns raw logits (not
-sigmoid-activated). The training pipeline applies the loss; the model
-does not need to know what loss function is used.
+forward(x) receives a batch of RGB images and returns raw predictions in
+whatever representation the TARGET DATASET natively uses — see
+data/datasets/base.py. For TuSimple, that's a [B, 2, MAX_LANES, NUM_ROWS]
+tensor (x-coordinate + existence logit per lane slot per canonical row);
+a different dataset with a different native annotation format would mean
+a different output shape. The shape is defined by the dataset, not by
+this base class: every model targeting a given dataset must produce that
+dataset's representation directly, so evaluation can apply that
+dataset's own official metric with zero conversion in between.
 
-    input  x      : [B, 3, H, W]  float32  pixel values in [0, 1]
-    output logits : [B, 1, H, W]  float32  unbounded
+    input x : [B, 3, H, W]  float32  pixel values in [0, 1]
 
-Every architecture in models/ must satisfy this contract so it can be
-dropped into the shared training and evaluation pipeline unchanged.
+Models that target a dataset with a dense dictionary-of-pixels-style
+representation would instead output a dense tensor here — this base
+class does not assume points any more than it assumes masks. Every
+architecture in models/ must satisfy whatever contract its target
+dataset defines so it can be dropped into the shared training and
+evaluation pipeline unchanged.
 """
 
 from abc import ABC, abstractmethod
@@ -33,7 +42,8 @@ class BaseModel(nn.Module, ABC):
 
         Returns
         -------
-        torch.Tensor  [B, 1, H, W]  raw logits
+        torch.Tensor  shape and meaning defined by the target dataset
+        (see module docstring above)
         """
         ...
 

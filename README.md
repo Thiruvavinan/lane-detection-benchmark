@@ -28,49 +28,11 @@ Milestone 5 — Transformer   LaneSegNet
 
 ## What makes this different
 
-Most benchmarks stop at:
-
-```
-IoU: 95.2   F1: 0.94   ✓ Done
-```
-
-This one adds an **Engineering Evaluation** section for every architecture:
-
-### Runtime
-| Metric | Description |
-|--------|-------------|
-| FPS | Frames per second on a fixed GPU |
-| Latency (ms) | End-to-end inference time per frame |
-
-### Memory
-| Metric | Description |
-|--------|-------------|
-| Peak GPU (MB) | Maximum allocation during inference |
-
-### Failure Analysis
-Qualitative examples across hard scenarios:
-
-| Scenario | Tag |
-|----------|-----|
-| Curves | `curve` |
-| Shadows | `shadow` |
-| Night | `night` |
-| Rain | `rain` |
-| Construction zones | `construction` |
-| Lane merge | `merge` |
-| Exit ramps | `exit` |
-
-### Robustness Table
-Instead of a single IoU number, every architecture reports:
-
-| Scenario | IoU | F1 | FPS |
-|----------|-----|----|-----|
-| Straight roads | | | |
-| Curves | | | |
-| Exit | | | |
-| Merge | | | |
-| Night | | | |
-| Rain | | | |
+Most benchmarks stop at a single accuracy number. This one also tracks
+engineering cost (FPS, latency, peak GPU memory — `evaluation/engineering.py`)
+and exports failure cases per scenario (curve, night, rain, …) when a
+dataset provides scenario labels. TuSimple doesn't, so that's currently
+one "unlabeled" bucket rather than a real per-scenario breakdown.
 
 ---
 
@@ -132,42 +94,13 @@ python scripts/benchmark.py  --config configs/unet_tusimple.yaml
 
 ## Results
 
-### U-Net (Milestone 2 baseline)
+### U-Net (Milestone 2) — pending retrain
 
-Trained on TuSimple, 360×640, early-stopped at epoch 10 (`val_loss` stopped
-improving past that point — see `runs/unet_tusimple/`). Evaluated on the
-full TuSimple test set (2,782 images).
+- **Goal**: score every architecture with the target dataset's own official metric, on real model output, with no lossy conversion step.
+- **Status**: output format changed to match TuSimple's native keypoints directly (was a dense mask + heuristic extraction). Old checkpoint is incompatible — retraining now.
+- **Approach**: `BaseDataset`/`BaseModel` contracts are dataset-defined, not universal (see `data/README.md`, `models/README.md`). A shared `LanePointHead` (`models/heads.py`) turns any backbone's features into TuSimple's own point format directly.
 
-| Metric set | Metric | Value |
-|---|---|---|
-| Pixel-level (ours, strict) | IoU | 0.6070 |
-| | F1 | 0.7555 |
-| | Precision | 0.7410 |
-| | Recall | 0.7705 |
-| Point-level (official TuSimple, ±20px) | Accuracy | 0.7734 |
-| | FP | 0.1194 |
-| | FN | 0.2450 |
-
-Note: the official-metric numbers aren't directly comparable to published
-TuSimple leaderboard entries (which cluster around 95–97% accuracy) — this
-baseline stopped well short of convergence, and `mask_to_lanes()`
-(`evaluation/tusimple_metrics.py`) is a heuristic for turning a dense mask
-into per-row keypoints (connected components per row, linked into tracks
-by extrapolating each track's trend), not a real instance-aware lane
-decoder. Good enough for comparing architectures under this pipeline; not
-a leaderboard submission. It also only handles dense-mask predictions —
-a model with native point output (planned for PINet, Milestone 4) should
-bypass this heuristic and score its real points directly, since a plain
-binary mask can't reliably separate lane instances that are close together
-(no per-lane identity in a single-channel mask).
-
-Engineering evaluation (FPS, latency, peak GPU memory) and per-scenario
-failure analysis are not yet populated — TuSimple provides no scenario
-labels (`curve`/`night`/`rain`/etc.), so the failure-case export only has
-a single "unlabeled" bucket for now.
-
-Remaining milestones (PINet, LaneSegNet) will be added to this table as
-they're trained.
+Numbers land here once the retrain finishes. Pixel-level IoU/F1 and per-scenario failure analysis are on hold — see `evaluation/README.md`.
 
 ---
 

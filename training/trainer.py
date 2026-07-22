@@ -133,10 +133,10 @@ class Trainer:
         with context():
             for batch in loader:
                 images = batch["image"].to(self.device)
-                masks = batch["mask"].to(self.device)
+                targets = batch["target"].to(self.device)
 
-                logits = self.model(images)
-                loss = self.loss_fn(logits, masks)
+                pred = self.model(images)
+                loss = self.loss_fn(pred, targets)
 
                 if training:
                     self.optimizer.zero_grad()
