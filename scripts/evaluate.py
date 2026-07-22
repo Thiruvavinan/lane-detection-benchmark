@@ -28,6 +28,8 @@ from torch.utils.data import DataLoader
 from data.datasets import build_dataset
 from models import build_model
 from evaluation.metrics import SegmentationEvaluator, format_results
+from evaluation.tusimple_metrics import TuSimpleEvaluator, mask_to_lanes
+from evaluation.tusimple_metrics import format_results as format_tusimple_results
 from visualization.failure_cases import FailureCaseExporter
 
 
@@ -83,7 +85,9 @@ def main():
     # Evaluate
     # ------------------------------------------------------------------
     evaluator = SegmentationEvaluator(threshold=threshold)
+    tusimple_evaluator = TuSimpleEvaluator()
     exporter = FailureCaseExporter(out_dir=str(output_dir / "failure_cases"), threshold=threshold)
+    image_size = tuple(ds_cfg["image_size"])
 
     with torch.no_grad():
         for batch in test_loader:
@@ -95,8 +99,20 @@ def main():
             evaluator.update(logits.cpu(), masks, meta)
             exporter.update(batch["image"], masks, logits.cpu(), meta)
 
+            pred_masks = (torch.sigmoid(logits).squeeze(1) > threshold).cpu().numpy()
+            for i, m in enumerate(meta):
+                pred_lanes = mask_to_lanes(
+                    pred_masks[i],
+                    h_samples=m["h_samples"],
+                    mask_size=image_size,
+                    orig_size=m["orig_size"],
+                )
+                tusimple_evaluator.update(pred_lanes, m["gt_lanes"], m["h_samples"], meta=m)
+
     results = evaluator.compute()
+    tusimple_results = tusimple_evaluator.compute()
     print("\n" + format_results(results))
+    print("\n" + format_tusimple_results(tusimple_results))
     exporter.save(n_worst=args.n_worst)
 
 

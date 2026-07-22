@@ -41,7 +41,7 @@ Usage
 """
 
 from collections import defaultdict
-from typing import Dict, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -51,6 +51,8 @@ except ImportError:  # pragma: no cover
     import json  # noqa: F401
 
 from sklearn.linear_model import LinearRegression
+
+INVALID = -2  # TuSimple's convention for "no lane point at this row"
 
 
 class LaneEval(object):
@@ -208,6 +210,93 @@ def _average(sum_acc: float, sum_fp: float, sum_fn: float, count: int) -> dict:
         "fp": round(sum_fp / n, 4),
         "fn": round(sum_fn / n, 4),
     }
+
+
+def mask_to_lanes(
+    mask: np.ndarray,
+    h_samples: Sequence[float],
+    mask_size: Tuple[int, int],
+    orig_size: Tuple[int, int],
+    max_gap_px: float = 40.0,
+) -> List[List[float]]:
+    """
+    Extract lane x-coordinates from a dense binary mask, in the same
+    per-row format as TuSimple's keypoint annotations, so predictions
+    from a dense-mask model (every architecture in this benchmark) can
+    be scored with the official point-level metric above.
+
+    Our models have no notion of separate lane instances -- just one
+    binary mask -- so this is a heuristic, not a learned prediction:
+      1. For each h_samples row, scale it into mask coordinates and find
+         contiguous runs of foreground pixels; each run's center is one
+         candidate point, scaled back to original-image x.
+      2. Walk rows top to bottom, greedily extending each open lane
+         track with whichever unused candidate is closest in x (within
+         `max_gap_px`); unmatched candidates start new tracks. A row
+         with no nearby candidate leaves that track's point as -2
+         ("no lane here"), matching TuSimple's own convention.
+
+    Good enough for comparing architectures that all share this dense
+    mask output -- not a substitute for a real instance-aware decoder.
+
+    Parameters
+    ----------
+    mask       : [H, W] binary array, at `mask_size` resolution
+    h_samples  : y rows to sample, in ORIGINAL image coordinates
+    mask_size  : (H, W) of `mask`
+    orig_size  : (H, W) of the original image the annotation was made on
+    """
+    mask_h, mask_w = mask_size
+    orig_h, orig_w = orig_size
+    scale_y = mask_h / orig_h
+    scale_x_inv = orig_w / mask_w
+
+    # 1. Per-row candidate x positions, in original-image coordinates.
+    row_candidates: List[List[float]] = []
+    for y in h_samples:
+        y_mask = min(max(int(round(y * scale_y)), 0), mask_h - 1)
+        row = mask[y_mask]
+        candidates = []
+        x = 0
+        while x < mask_w:
+            if row[x]:
+                start = x
+                while x < mask_w and row[x]:
+                    x += 1
+                candidates.append((start + x - 1) / 2.0 * scale_x_inv)
+            else:
+                x += 1
+        row_candidates.append(candidates)
+
+    # 2. Greedily link candidates across rows into lane tracks.
+    tracks: List[List[float]] = []
+    last_x: List[float] = []
+
+    for row_idx, candidates in enumerate(row_candidates):
+        used = [False] * len(candidates)
+
+        for t in range(len(tracks)):
+            best_j, best_dist = -1, max_gap_px
+            for j, cx in enumerate(candidates):
+                if used[j]:
+                    continue
+                dist = abs(cx - last_x[t])
+                if dist < best_dist:
+                    best_j, best_dist = j, dist
+            if best_j >= 0:
+                tracks[t][row_idx] = candidates[best_j]
+                last_x[t] = candidates[best_j]
+                used[best_j] = True
+
+        for j, cx in enumerate(candidates):
+            if used[j]:
+                continue
+            new_track = [INVALID] * len(h_samples)
+            new_track[row_idx] = cx
+            tracks.append(new_track)
+            last_x.append(cx)
+
+    return tracks
 
 
 def format_results(results: dict) -> str:

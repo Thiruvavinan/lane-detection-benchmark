@@ -16,8 +16,9 @@ It does not contain:
 
 ```
 evaluation/
-├── metrics.py          # IoU, F1, per-scenario breakdown
-├── engineering.py      # FPS, latency, peak GPU memory
+├── metrics.py            # IoU, F1, per-scenario breakdown (pixel-level, strict)
+├── tusimple_metrics.py   # Official TuSimple Accuracy/FP/FN (point-level, ±20px)
+├── engineering.py        # FPS, latency, peak GPU memory
 └── README.md
 ```
 

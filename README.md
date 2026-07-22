@@ -132,7 +132,37 @@ python scripts/benchmark.py  --config configs/unet_tusimple.yaml
 
 ## Results
 
-*Populated after Milestone 3.*
+### U-Net (Milestone 2 baseline)
+
+Trained on TuSimple, 360×640, early-stopped at epoch 10 (`val_loss` stopped
+improving past that point — see `runs/unet_tusimple/`). Evaluated on the
+full TuSimple test set (2,782 images).
+
+| Metric set | Metric | Value |
+|---|---|---|
+| Pixel-level (ours, strict) | IoU | 0.6070 |
+| | F1 | 0.7555 |
+| | Precision | 0.7410 |
+| | Recall | 0.7705 |
+| Point-level (official TuSimple, ±20px) | Accuracy | 0.6089 |
+| | FP | 0.1254 |
+| | FN | 0.4186 |
+
+Note: the official-metric numbers aren't directly comparable to published
+TuSimple leaderboard entries (which cluster around 95–97% accuracy) — this
+baseline stopped well short of convergence, and `mask_to_lanes()`
+(`evaluation/tusimple_metrics.py`) is a simple heuristic for turning a
+dense mask into per-row keypoints, not a real instance-aware lane decoder.
+Good enough for comparing architectures under this pipeline; not a
+leaderboard submission.
+
+Engineering evaluation (FPS, latency, peak GPU memory) and per-scenario
+failure analysis are not yet populated — TuSimple provides no scenario
+labels (`curve`/`night`/`rain`/etc.), so the failure-case export only has
+a single "unlabeled" bucket for now.
+
+Remaining milestones (PINet, LaneSegNet) will be added to this table as
+they're trained.
 
 ---
 

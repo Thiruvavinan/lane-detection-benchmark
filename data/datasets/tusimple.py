@@ -164,6 +164,12 @@ class TuSimpleDataset(BaseDataset):
                 # TuSimple has no scenario labels; set to None.
                 # The evaluation step will skip per-scenario metrics.
                 "scenario": None,
+                # Raw keypoint annotation, kept for the official TuSimple
+                # point-level metric (evaluation/tusimple_metrics.py),
+                # which needs exact ground truth, not our rasterized mask.
+                "gt_lanes": lanes,
+                "h_samples": h_samples,
+                "orig_size": (orig_h, orig_w),
             },
         }
 
