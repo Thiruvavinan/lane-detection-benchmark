@@ -35,6 +35,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="Path to YAML config")
     parser.add_argument("--device", default=None, help="Override device (cuda/cpu/mps)")
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Resume from <output_dir>/last.pth if it exists, instead of starting over",
+    )
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -107,20 +111,31 @@ def main():
     # Train
     # ------------------------------------------------------------------
     train_cfg = cfg["training"]
+    output_dir = Path(cfg["experiment"]["output_dir"])
     trainer = Trainer(
         model=model,
         loss_fn=loss_fn,
         optimizer=optimizer,
         scheduler=scheduler,
         device=device,
-        output_dir=cfg["experiment"]["output_dir"],
+        output_dir=str(output_dir),
     )
+
+    resume_from = None
+    if args.resume:
+        candidate = output_dir / "last.pth"
+        if candidate.exists():
+            resume_from = str(candidate)
+        else:
+            print(f"--resume passed but no checkpoint found at {candidate}; starting fresh")
+
     trainer.fit(
         train_loader=train_loader,
         val_loader=val_loader,
         epochs=train_cfg["epochs"],
         val_every=train_cfg.get("val_every", 1),
         early_stopping_patience=train_cfg.get("early_stopping_patience"),
+        resume_from=resume_from,
     )
 
 

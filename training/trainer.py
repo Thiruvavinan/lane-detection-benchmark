@@ -57,18 +57,35 @@ class Trainer:
         epochs: int,
         val_every: int = 1,
         early_stopping_patience: Optional[int] = None,
+        resume_from: Optional[str] = None,
     ):
         """
         early_stopping_patience : stop once this many epochs have passed
             since val_loss last improved (measured in epochs, but only
             checked at validation points, i.e. every `val_every` epochs).
             None disables early stopping and always runs `epochs` epochs.
+        resume_from : path to a checkpoint saved by this Trainer. Restores
+            model/optimizer/scheduler state and continues from the epoch
+            after the one the checkpoint was saved at, instead of starting
+            over from epoch 1.
         """
+        start_epoch = 1
         best_val_loss = float("inf")
         epochs_since_improvement = 0
+
+        if resume_from is not None:
+            ckpt = self.load_checkpoint(resume_from)
+            start_epoch = ckpt.get("epoch", 0) + 1
+            best_val_loss = ckpt.get("best_val_loss", best_val_loss)
+            epochs_since_improvement = ckpt.get("epochs_since_improvement", 0)
+            print(
+                f"Resumed from {resume_from}: starting at epoch {start_epoch} "
+                f"(best_val_loss={best_val_loss:.4f})"
+            )
+
         history = []
 
-        for epoch in range(1, epochs + 1):
+        for epoch in range(start_epoch, epochs + 1):
             t0 = time.time()
             train_loss = self._run_epoch(train_loader, training=True)
             elapsed = time.time() - t0
@@ -81,7 +98,7 @@ class Trainer:
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
                     epochs_since_improvement = 0
-                    self._save_checkpoint("best.pth")
+                    self._save_checkpoint("best.pth", epoch, best_val_loss, epochs_since_improvement)
                 else:
                     epochs_since_improvement += val_every
 
@@ -90,7 +107,7 @@ class Trainer:
 
             history.append(log)
             self._print_log(log)
-            self._save_checkpoint("last.pth")
+            self._save_checkpoint("last.pth", epoch, best_val_loss, epochs_since_improvement)
 
             if (
                 early_stopping_patience is not None
@@ -130,14 +147,33 @@ class Trainer:
 
         return total_loss / len(loader)
 
-    def _save_checkpoint(self, filename: str):
+    def _save_checkpoint(
+        self,
+        filename: str,
+        epoch: int,
+        best_val_loss: float,
+        epochs_since_improvement: int,
+    ):
         torch.save(
             {
+                "epoch": epoch,
                 "model_state": self.model.state_dict(),
                 "optimizer_state": self.optimizer.state_dict(),
+                "scheduler_state": self.scheduler.state_dict() if self.scheduler is not None else None,
+                "best_val_loss": best_val_loss,
+                "epochs_since_improvement": epochs_since_improvement,
             },
             self.output_dir / filename,
         )
+
+    def load_checkpoint(self, path: str) -> dict:
+        """Restore model/optimizer/scheduler state from a checkpoint; returns the raw checkpoint dict."""
+        ckpt = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(ckpt["model_state"])
+        self.optimizer.load_state_dict(ckpt["optimizer_state"])
+        if self.scheduler is not None and ckpt.get("scheduler_state") is not None:
+            self.scheduler.load_state_dict(ckpt["scheduler_state"])
+        return ckpt
 
     @staticmethod
     def _print_log(log: dict):
