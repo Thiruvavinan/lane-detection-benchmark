@@ -231,10 +231,24 @@ def mask_to_lanes(
          contiguous runs of foreground pixels; each run's center is one
          candidate point, scaled back to original-image x.
       2. Walk rows top to bottom, greedily extending each open lane
-         track with whichever unused candidate is closest in x (within
-         `max_gap_px`); unmatched candidates start new tracks. A row
-         with no nearby candidate leaves that track's point as -2
-         ("no lane here"), matching TuSimple's own convention.
+         track with whichever unused candidate is closest to the
+         track's *predicted* x (within `max_gap_px`) -- predicted by
+         linearly extrapolating from the track's last point using its
+         running slope (x-change per row), not just its last raw x.
+         This matters because rows are 10px apart in y but a curving or
+         steeply-angled lane can shift well past `max_gap_px` in x over
+         even a couple of missed rows; extrapolating the trend keeps a
+         gappy/curving lane as one track instead of splitting it into
+         several short fragments. Unmatched candidates start new
+         tracks. A row with no nearby candidate leaves that track's
+         point as -2 ("no lane here"), matching TuSimple's convention.
+
+         Fragmentation is expensive under the official metric: a track
+         only needs to *exist* at every gt row to score well, since a
+         missing point where gt has one counts as a miss for the whole
+         row (see `line_accuracy` above) -- so one lane split into two
+         half-length tracks scores far worse than one full-length track
+         with a few wrong points in the middle.
 
     Good enough for comparing architectures that all share this dense
     mask output -- not a substitute for a real instance-aware decoder.
@@ -268,24 +282,32 @@ def mask_to_lanes(
                 x += 1
         row_candidates.append(candidates)
 
-    # 2. Greedily link candidates across rows into lane tracks.
+    # 2. Greedily link candidates across rows into lane tracks, matching
+    #    against each track's linearly-extrapolated predicted position.
     tracks: List[List[float]] = []
+    last_row: List[int] = []
     last_x: List[float] = []
+    slope: List[float] = []  # x-change per row index, 0 until 2+ points seen
 
     for row_idx, candidates in enumerate(row_candidates):
         used = [False] * len(candidates)
 
         for t in range(len(tracks)):
+            predicted_x = last_x[t] + slope[t] * (row_idx - last_row[t])
             best_j, best_dist = -1, max_gap_px
             for j, cx in enumerate(candidates):
                 if used[j]:
                     continue
-                dist = abs(cx - last_x[t])
+                dist = abs(cx - predicted_x)
                 if dist < best_dist:
                     best_j, best_dist = j, dist
             if best_j >= 0:
-                tracks[t][row_idx] = candidates[best_j]
-                last_x[t] = candidates[best_j]
+                cx = candidates[best_j]
+                gap = row_idx - last_row[t]
+                slope[t] = (cx - last_x[t]) / gap
+                tracks[t][row_idx] = cx
+                last_row[t] = row_idx
+                last_x[t] = cx
                 used[best_j] = True
 
         for j, cx in enumerate(candidates):
@@ -294,7 +316,9 @@ def mask_to_lanes(
             new_track = [INVALID] * len(h_samples)
             new_track[row_idx] = cx
             tracks.append(new_track)
+            last_row.append(row_idx)
             last_x.append(cx)
+            slope.append(0.0)
 
     return tracks
 

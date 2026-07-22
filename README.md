@@ -144,17 +144,22 @@ full TuSimple test set (2,782 images).
 | | F1 | 0.7555 |
 | | Precision | 0.7410 |
 | | Recall | 0.7705 |
-| Point-level (official TuSimple, ±20px) | Accuracy | 0.6089 |
-| | FP | 0.1254 |
-| | FN | 0.4186 |
+| Point-level (official TuSimple, ±20px) | Accuracy | 0.7734 |
+| | FP | 0.1194 |
+| | FN | 0.2450 |
 
 Note: the official-metric numbers aren't directly comparable to published
 TuSimple leaderboard entries (which cluster around 95–97% accuracy) — this
 baseline stopped well short of convergence, and `mask_to_lanes()`
-(`evaluation/tusimple_metrics.py`) is a simple heuristic for turning a
-dense mask into per-row keypoints, not a real instance-aware lane decoder.
-Good enough for comparing architectures under this pipeline; not a
-leaderboard submission.
+(`evaluation/tusimple_metrics.py`) is a heuristic for turning a dense mask
+into per-row keypoints (connected components per row, linked into tracks
+by extrapolating each track's trend), not a real instance-aware lane
+decoder. Good enough for comparing architectures under this pipeline; not
+a leaderboard submission. It also only handles dense-mask predictions —
+a model with native point output (planned for PINet, Milestone 4) should
+bypass this heuristic and score its real points directly, since a plain
+binary mask can't reliably separate lane instances that are close together
+(no per-lane identity in a single-channel mask).
 
 Engineering evaluation (FPS, latency, peak GPU memory) and per-scenario
 failure analysis are not yet populated — TuSimple provides no scenario
