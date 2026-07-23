@@ -20,7 +20,7 @@ A modular benchmark for evaluating modern lane detection architectures under a *
 Milestone 1 — Dataset       TuSimple
 Milestone 2 — Baseline      U-Net
 Milestone 3 — Evaluation    Metrics · Visualizations · Failure cases
-Milestone 4 — Architecture  DeepLab (same pipeline, zero changes elsewhere)
+Milestone 4 — Architecture  PINet
 Milestone 5 — Transformer   LaneSegNet
 ```
 
@@ -94,13 +94,9 @@ python scripts/benchmark.py  --config configs/unet_tusimple.yaml
 
 ## Results
 
-### U-Net (Milestone 2) — pending retrain
-
-- **Goal**: score every architecture with the target dataset's own official metric, on real model output, with no lossy conversion step.
-- **Status**: output format changed to match TuSimple's native keypoints directly (was a dense mask + heuristic extraction). Old checkpoint is incompatible — retraining now.
-- **Approach**: `BaseDataset`/`BaseModel` contracts are dataset-defined, not universal (see `data/README.md`, `models/README.md`). A shared `LanePointHead` (`models/heads.py`) turns any backbone's features into TuSimple's own point format directly.
-
-Numbers land here once the retrain finishes. Pixel-level IoU/F1 and per-scenario failure analysis are on hold — see `evaluation/README.md`.
+*Pending — U-Net is retraining under a new output-format design (see
+`data/README.md` / `models/README.md`). Pixel-level IoU/F1 and
+per-scenario failure analysis are on hold — see `evaluation/README.md`.*
 
 ---
 
