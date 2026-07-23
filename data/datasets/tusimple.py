@@ -216,3 +216,30 @@ class TuSimpleDataset(BaseDataset):
             # Reverse slot order so slot 0 stays "leftmost" after mirroring.
             target = torch.flip(flipped, dims=[0])
         return image, target
+
+    # ------------------------------------------------------------------
+    # Official-metric scoring (see BaseDataset.score_batch)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def score_batch(cls, pred, targets, meta, evaluator, exist_threshold: float = 0.5) -> None:
+        """
+        pred    : [B, 2, MAX_LANES, NUM_ROWS] -- pred[:,0]=x, pred[:,1]=existence logit
+        targets : [B, MAX_LANES, NUM_ROWS]     -- ground truth, on the canonical H_SAMPLES grid
+        meta    : list of per-sample meta dicts
+        evaluator : a TuSimpleEvaluator (see evaluation.tusimple_metrics)
+        """
+        pred_coord = pred[:, 0]
+        pred_exists = torch.sigmoid(pred[:, 1]) > exist_threshold
+        h_samples = list(cls.H_SAMPLES)
+
+        for i in range(pred.shape[0]):
+            pred_lanes = [
+                [
+                    float(pred_coord[i, slot, r]) if pred_exists[i, slot, r] else cls.INVALID
+                    for r in range(cls.NUM_ROWS)
+                ]
+                for slot in range(cls.MAX_LANES)
+            ]
+            gt_lanes = [[x if x >= 0 else cls.INVALID for x in row] for row in targets[i].tolist()]
+            evaluator.update(pred_lanes, gt_lanes, h_samples, meta=meta[i])

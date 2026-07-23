@@ -30,8 +30,12 @@ evaluation/
 
 Models output their target dataset's own representation directly (see
 data/datasets/base.py, models/base.py) — for TuSimple, sparse keypoints.
-`scripts/evaluate.py` scores that output with `TuSimpleEvaluator`, the
-official TuSimple metric, with no conversion step in between:
+`scripts/evaluate.py` has no dataset-specific code: it resolves the
+right evaluator via `evaluation.build_evaluator(dataset_name)` (see
+`EVALUATORS` in `evaluation/__init__.py`) and lets the dataset class
+convert its own output into that evaluator's input (`score_batch`, see
+`data/datasets/base.py`). For TuSimple that's `TuSimpleEvaluator`,
+scored with no conversion step in between:
 
 | Metric | Description |
 |--------|-------------|

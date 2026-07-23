@@ -52,6 +52,10 @@ class BaseDataset(Dataset, ABC):
     The `scenario` tag is what enables per-scenario metrics in evaluation/.
     If your dataset does not provide scenario labels, set it to None and the
     evaluation step will simply skip the per-scenario breakdown.
+
+    Each dataset also implements `score_batch` (below), so
+    scripts/evaluate.py never needs to know the specifics of any one
+    dataset's representation or metric — it just calls it.
     """
 
     @abstractmethod
@@ -60,6 +64,21 @@ class BaseDataset(Dataset, ABC):
 
     @abstractmethod
     def __getitem__(self, idx: int) -> Dict[str, Any]:
+        ...
+
+    @classmethod
+    @abstractmethod
+    def score_batch(cls, pred: torch.Tensor, targets: torch.Tensor, meta: List[dict], evaluator, **kwargs) -> None:
+        """
+        Convert one batch of raw model output + ground truth into
+        whatever this dataset's own official evaluator expects, and feed
+        it in (typically one or more `evaluator.update(...)` calls).
+
+        Only the dataset knows what its own `target`/model-output shape
+        means, so it — not scripts/evaluate.py — owns this conversion.
+        See evaluation.build_evaluator for how `evaluator` is constructed
+        from a dataset name.
+        """
         ...
 
     # ------------------------------------------------------------------

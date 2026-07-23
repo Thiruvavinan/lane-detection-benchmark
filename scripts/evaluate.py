@@ -12,9 +12,13 @@ Usage
 
 The model's output is already in the target dataset's own representation
 (see data/datasets/base.py, models/base.py) — there is no mask, and no
-conversion step between prediction and metric. Output: the official
-metric (global + per-scenario, when the dataset provides scenario
-labels), printed to stdout.
+conversion step between prediction and metric. This script has no
+dataset-specific code: it resolves the model's output shape and the
+official evaluator from the dataset class itself (see
+data/datasets/base.py's `score_batch`, evaluation.build_evaluator), so
+adding a new dataset never requires touching this file. Output: the
+official metric (global + per-scenario, when the dataset provides
+scenario labels), printed to stdout.
 """
 
 import argparse
@@ -29,7 +33,7 @@ from torch.utils.data import DataLoader
 
 from data.datasets import DATASETS, build_dataset
 from models import build_model
-from evaluation.tusimple_metrics import TuSimpleEvaluator, format_results
+from evaluation import build_evaluator
 
 
 def main():
@@ -87,41 +91,21 @@ def main():
     print(f"Loaded checkpoint: {ckpt_path}")
 
     # ------------------------------------------------------------------
-    # Evaluate
+    # Evaluate — dataset owns the conversion from raw output to its metric
     # ------------------------------------------------------------------
-    evaluator = TuSimpleEvaluator()
-    h_samples = list(ds_cls.H_SAMPLES)
+    evaluator, format_results = build_evaluator(ds_cfg["name"])
 
     with torch.no_grad():
         for batch in test_loader:
             images = batch["image"].to(device)
-            targets = batch["target"]  # [B, MAX_LANES, NUM_ROWS], ground truth on canonical grid
+            targets = batch["target"]
             meta = batch["meta"]
 
-            pred = model(images).cpu()          # [B, 2, MAX_LANES, NUM_ROWS]
-            pred_coord = pred[:, 0]
-            pred_exists = torch.sigmoid(pred[:, 1]) > exist_threshold
-
-            for i in range(images.shape[0]):
-                pred_lanes = _lanes_from_tensor(pred_coord[i], pred_exists[i])
-                gt_lanes = _lanes_from_target(targets[i])
-                evaluator.update(pred_lanes, gt_lanes, h_samples, meta=meta[i])
+            pred = model(images).cpu()
+            ds_cls.score_batch(pred, targets, meta, evaluator, exist_threshold=exist_threshold)
 
     results = evaluator.compute()
     print("\n" + format_results(results))
-
-
-def _lanes_from_tensor(coords: torch.Tensor, exists: torch.Tensor):
-    """[MAX_LANES, NUM_ROWS] coord + bool exist tensors -> TuSimple's list-of-lists format."""
-    return [
-        [float(coords[slot, r]) if exists[slot, r] else -2.0 for r in range(coords.shape[1])]
-        for slot in range(coords.shape[0])
-    ]
-
-
-def _lanes_from_target(target: torch.Tensor):
-    """Ground-truth [MAX_LANES, NUM_ROWS] tensor -> TuSimple's list-of-lists format."""
-    return [[x if x >= 0 else -2.0 for x in row] for row in target.tolist()]
 
 
 if __name__ == "__main__":
